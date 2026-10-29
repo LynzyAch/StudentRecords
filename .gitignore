@@ -40,4 +40,4 @@ yarn-error.*
 /ios
 /android
 
-backend/.env
+.env

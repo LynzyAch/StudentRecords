@@ -1,440 +1,443 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useState } from "react";
 import {
-  ActivityIndicator,
-  FlatList,
   StyleSheet,
   Text,
+  View,
   TextInput,
   TouchableOpacity,
-  View,
-} from 'react-native';
-import { BASE_URl } from './config';
+  Image,
+  ActivityIndicator,
+  Alert,
+  ScrollView,
+  StatusBar,
+  Modal,
+} from "react-native";
+import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
+import * as ImagePicker from "expo-image-picker";
+import emailjs from "@emailjs/react-native";
+import "./global.css";
 
-const StudentForm = ({
-  name,
-  setName,
-  course,
-  setCourse,
-  year,
-  setYear,
-  saving,
-  createStudent,
-  formError,
-  success,
-  listError,
-  refreshing,
-  fetchStudents,
-  students,
-}) => {
-  return (
-    <View>
-      <Text style={styles.title}>Student Records</Text>
-      <Text style={styles.subtitle}>Manage student information</Text>
-
-      <View style={styles.form}>
-        <Text style={styles.sectionTitle}>Add Student</Text>
-
-        <TextInput
-          style={styles.input}
-          placeholder="Student name"
-          value={name}
-          onChangeText={setName}
-          editable={!saving}
-          autoCapitalize="words"
-          returnKeyType="next"
-        />
-
-        <TextInput
-          style={styles.input}
-          placeholder="Course (e.g. BSIT)"
-          value={course}
-          onChangeText={setCourse}
-          editable={!saving}
-          returnKeyType="next"
-        />
-
-        <TextInput
-          style={styles.input}
-          placeholder="Year level"
-          value={year}
-          onChangeText={setYear}
-          keyboardType="number-pad"
-          editable={!saving}
-          returnKeyType="done"
-        />
-
-        {formError ? (
-          <Text style={styles.error}>{formError}</Text>
-        ) : null}
-
-        {success ? (
-          <Text style={styles.success}>{success}</Text>
-        ) : null}
-
-        <TouchableOpacity
-          style={[styles.addButton, saving && styles.disabledButton]}
-          onPress={createStudent}
-          disabled={saving}
-          accessibilityRole="button"
-        >
-          {saving ? (
-            <ActivityIndicator color="#ffffff" />
-          ) : (
-            <Text style={styles.buttonText}>+ Add Student</Text>
-          )}
-        </TouchableOpacity>
-      </View>
-
-      <View style={styles.listHeader}>
-        <View style={styles.listTitleRow}>
-          <Text style={styles.sectionTitle}>Student List</Text>
-
-          <View style={styles.countBadge}>
-            <Text style={styles.countText}>Record: {students.length}</Text>
-          </View>
-        </View>
-
-        <TouchableOpacity
-          style={styles.refreshButton}
-          onPress={() => fetchStudents(true)}
-          disabled={refreshing}
-          accessibilityRole="button"
-        >
-          {refreshing ? (
-            <ActivityIndicator color="#2563eb" size="small" />
-          ) : (
-            <Text style={styles.refreshText}>↻ Refresh</Text>
-          )}
-        </TouchableOpacity>
-      </View>
-
-      {listError ? (
-        <Text style={styles.error}>{listError}</Text>
-      ) : null}
-    </View>
-  );
-};
+const CATEGORIES = [
+  "Account Problem",
+  "Technical Issue",
+  "Payment Concern",
+  "Other",
+];
 
 export default function App() {
-  const [students, setStudents] = useState([]);
-  const [name, setName] = useState('');
-  const [course, setCourse] = useState('');
-  const [year, setYear] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [listError, setListError] = useState('');
-  const [formError, setFormError] = useState('');
-  const [success, setSuccess] = useState('');
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [issueCategory, setIssueCategory] = useState(CATEGORIES[0]);
+  const [message, setMessage] = useState("");
+  const [imageUri, setImageUri] = useState(null);
+  const [loading, setLoading] = useState(false);
 
-  const fetchStudents = useCallback(async (isRefresh = false) => {
-    if (isRefresh) {
-      setRefreshing(true);
-    } else {
-      setLoading(true);
-    }
+  // Modal Confirmation
+  const [isModalVisible, setIsModalVisible] = useState(false);
 
-    setListError('');
+  const [alertModal, setAlertModal] = useState({
+    visible: false,
+    title: "",
+    message: "",
+  });
 
+  const showAlert = (title, message) => {
+    setAlertModal({
+      visible: true,
+      title,
+      message,
+    });
+  };
+
+  const handleSelectImage = async () => {
     try {
-      const response = await fetch(`${BASE_URl}/students`);
+      const permissionResult =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
 
-      if (!response.ok) {
-        throw new Error('Failed to load students.');
+      if (!permissionResult.granted) {
+        showAlert(
+          "Permission Denied",
+          "Gallery Access is required to select a screenshot.",
+        );
+        return;
       }
 
-      const data = await response.json();
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        quality: 0.8,
+      });
 
-      if (!Array.isArray(data)) {
-        throw new Error('Invalid student data.');
+      if (!result.canceled && result.assets[0].uri) {
+        setImageUri(result.assets[0].uri);
       }
-
-      setStudents(data);
     } catch (error) {
-      setListError(error.message || 'Cannot connect to server.');
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
+      showAlert("Error", "An error occurred while opening the image gallery.");
     }
-  }, []);
+  };
 
-  useEffect(() => {
-    fetchStudents();
-  }, [fetchStudents]);
+  const uploadImageToCloudinary = async (uri) => {
+    const cloudName = process.env.EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME;
+    const uploadPreset = process.env.EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET;
 
-  const createStudent = async () => {
-    const student = {
-      name: name.trim(),
-      course: course.trim(),
-      year: year.trim(),
+    if (!cloudName || !uploadPreset) {
+      throw new Error("Cloudinary environment variables are missing!");
+    }
+
+    const filename = uri.split("/").pop() || "screenshot.jpg";
+
+    const imageResponse = await fetch(uri);
+    const blob = await imageResponse.blob()
+
+
+    const formData = new FormData();
+    formData.append("file", blob, filename);
+    formData.append("upload_preset", uploadPreset)
+
+    formData.append("upload_preset", uploadPreset);
+
+    const response = await fetch(
+      `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`,
+      {
+        method: "POST",
+        body: formData,
+      },
+    );
+
+    const data = await response.json();
+
+    if (!response.ok || !data.secure_url) {
+      throw new Error(data.error?.message || "Failed to upload image.");
+    }
+    return data.secure_url;
+  };
+
+  const sendSupportEmail = async (params) => {
+    const serviceid = process.env.EXPO_PUBLIC_EMAILJS_SERVICE_ID;
+    const templateid = process.env.EXPO_PUBLIC_EMAILJS_TEMPLATE_ID;
+    const publicKey = process.env.EXPO_PUBLIC_EMAILJS_PUBLIC_KEY;
+
+    if (!serviceid || !templateid || !publicKey) {
+      throw new Error("EmailJS environment variables are missing.");
+    }
+
+    const templateParams = {
+      name: params.name,
+      reply_to: params.email,
+      issue_category: params.issueCategory,
+      message: params.message,
+      image_url: params.imageUrl || "No screenshot provided",
     };
 
-    if (!student.name || !student.course || !student.year) {
-      setFormError('Please fill in all fields.');
-      setSuccess('');
+    return await emailjs.send(serviceid, templateid, templateParams, {
+      publicKey,
+    });
+  };
+
+  // 1. Triggered when clicking "Submit Ticket" — Performs Local Validation
+  const handleOpenVerificationModal = () => {
+    if (!name.trim() || !email.trim() || !message.trim()) {
+      showAlert("Validation Error", "Please fill out all required fields.");
       return;
     }
 
-    setSaving(true);
-    setFormError('');
-    setSuccess('');
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email.trim())) {
+      showAlert("Validation Error", "Please enter a valid email address!");
+      return;
+    }
+
+    // Validation passed -> Show Verification Modal
+    setIsModalVisible(true);
+  };
+
+  // 2. Triggered when clicking "Confirm & Send" inside the Modal
+  const handleConfirmSubmit = async () => {
+    setLoading(true);
 
     try {
-      const response = await fetch(`${BASE_URl}/students`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(student),
-      });
+      let uploadUrl = "";
 
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.message || 'Failed to add student.');
+      if (imageUri) {
+        try {
+          uploadUrl = await uploadImageToCloudinary(imageUri);
+        } catch (uploadError) {
+          console.log("Cloudinary Error: ", uploadError);
+          showAlert(
+            "Upload Failed",
+            "Screenshot upload failed. Email was not sent. Please try again.",
+          );
+          setLoading(false);
+          setIsModalVisible(false);
+          return;
+        }
       }
 
-      setName('');
-      setCourse('');
-      setYear('');
-      setSuccess('Student added successfully!');
+      await sendSupportEmail({
+        name: name.trim(),
+        email: email.trim(),
+        issueCategory,
+        message: message.trim(),
+        imageUrl: uploadUrl,
+      });
 
-      await fetchStudents(true);
-    } catch (error) {
-      setFormError(error.message || 'Cannot connect to server.');
+      setIsModalVisible(false);
+      showAlert("Success", "Your support ticket has been sent successfully!");
+
+      // Reset Form
+      setName("");
+      setEmail("");
+      setIssueCategory(CATEGORIES[0]);
+      setMessage("");
+      setImageUri(null);
+    } catch (emailError) {
+      console.log("EmailJS Error", emailError);
+      showAlert("Error", "Failed to send support request. Please try again.");
     } finally {
-      setSaving(false);
+      setLoading(false);
     }
   };
 
   return (
-    <FlatList
-      style={styles.screen}
-      contentContainerStyle={styles.container}
-      data={students}
-      keyExtractor={(item, index) =>
-        item._id ? String(item._id) : String(index)
-      }
-      keyboardShouldPersistTaps="handled"
-      ListHeaderComponent={
-        <StudentForm
-          name={name}
-          setName={setName}
-          course={course}
-          setCourse={setCourse}
-          year={year}
-          setYear={setYear}
-          saving={saving}
-          createStudent={createStudent}
-          formError={formError}
-          success={success}
-          listError={listError}
-          refreshing={refreshing}
-          fetchStudents={fetchStudents}
-          students={students}
-        />
-      }
-      refreshing={refreshing}
-      onRefresh={() => fetchStudents(true)}
-      ListEmptyComponent={
-        loading ? (
-          <ActivityIndicator
-            size="large"
-            color="#2563eb"
-            style={styles.empty}
-          />
-        ) : (
-          <Text style={styles.empty}>
-            {listError
-              ? 'Unable to load records.'
-              : 'No student records yet.'}
+    <SafeAreaProvider>
+      <SafeAreaView style={styles.safeArea}>
+        <StatusBar barStyle="dark-content" backgroundColor="#f8fafc" />
+        <ScrollView contentContainerStyle={styles.container}>
+          <Text className="text-2xl font-bold text-slate-900 mb-1 text-center">
+            Support Ticketing
           </Text>
-        )
-      }
-      renderItem={({ item }) => (
-        <View style={styles.card}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>
-              {(item.name || item.fullname || 'S')
-                .charAt(0)
-                .toUpperCase()}
+          <Text className="text-center text-sm text-slate-500 mb-2">
+            Fill out the form below to report a problem or issue.
+          </Text>
+
+          <View className="flex-1 bg-white border border-slate-200 mt-3 rounded-2xl p-5 shadow-sm">
+            {/* Full Name */}
+            <Text className="text-sm font-semibold text-slate-700">
+              Full Name <Text className="text-red-500">*</Text>
             </Text>
+            <TextInput
+              placeholder="John Doe"
+              placeholderTextColor="#94a3b8"
+              value={name}
+              onChangeText={setName}
+              editable={!loading}
+              className="bg-slate-100 p-3.5 my-2 rounded-xl text-slate-900 font-medium border border-slate-200"
+            />
+
+            {/* Email Address */}
+            <Text className="text-sm font-semibold text-slate-700 mt-2">
+              Email Address <Text className="text-red-500">*</Text>
+            </Text>
+            <TextInput
+              placeholder="johndoe@example.com"
+              placeholderTextColor="#94a3b8"
+              value={email}
+              onChangeText={setEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              editable={!loading}
+              className="bg-slate-100 p-3.5 my-2 rounded-xl text-slate-900 font-medium border border-slate-200"
+            />
+
+            {/* Issue Category */}
+            <Text className="text-sm font-semibold text-slate-700 mt-2 mb-2">
+              Issue Category <Text className="text-red-500">*</Text>
+            </Text>
+            <View className="flex-row flex-wrap gap-2 mb-3">
+              {CATEGORIES.map((cat) => {
+                const isSelected = issueCategory === cat;
+                return (
+                  <TouchableOpacity
+                    key={cat}
+                    disabled={loading}
+                    onPress={() => setIssueCategory(cat)}
+                    className={`px-3.5 py-2 rounded-full border ${
+                      isSelected
+                        ? "bg-blue-600 border-blue-600"
+                        : "bg-slate-100 border-slate-300"
+                    }`}
+                  >
+                    <Text
+                      className={`text-xs font-semibold ${
+                        isSelected ? "text-white" : "text-slate-600"
+                      }`}
+                    >
+                      {cat}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            {/* Message */}
+            <Text className="text-sm font-semibold text-slate-700 mt-2">
+              Message <Text className="text-red-500">*</Text>
+            </Text>
+            <TextInput
+              placeholder="Describe your issue in detail..."
+              placeholderTextColor="#94a3b8"
+              value={message}
+              onChangeText={setMessage}
+              multiline
+              numberOfLines={4}
+              textAlignVertical="top"
+              editable={!loading}
+              className="bg-slate-100 p-3.5 my-2 rounded-xl text-slate-900 font-medium border border-slate-200 h-28"
+            />
+
+            {/* Image Preview */}
+            {imageUri && (
+              <View className="mt-3 items-center bg-slate-50 p-3 rounded-xl border border-slate-200">
+                <Image
+                  source={{ uri: imageUri }}
+                  className="w-44 h-44 rounded-lg mb-2"
+                  resizeMode="cover"
+                />
+                {!loading && (
+                  <TouchableOpacity onPress={() => setImageUri(null)}>
+                    <Text className="text-red-600 font-semibold text-xs">
+                      Remove Screenshot
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
+
+            {/* Initial Submit Button (Triggers Validation & Opens Modal) */}
+            <TouchableOpacity
+              disabled={loading}
+              onPress={handleOpenVerificationModal}
+              className={`bg-blue-600 p-4 rounded-xl items-center justify-center mt-5 ${
+                loading ? "opacity-50" : ""
+              }`}
+            >
+              <Text className="text-white font-bold text-base">
+                Submit Ticket
+              </Text>
+            </TouchableOpacity>
           </View>
+        </ScrollView>
 
-          <View style={styles.studentInfo}>
-            <Text style={styles.studentName}>
-              {item.name || item.fullname || 'Unnamed Student'}
-            </Text>
+        {/* --- VERIFICATION MODAL --- */}
+        <Modal
+          visible={isModalVisible}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => {
+            if (!loading) setIsModalVisible(false);
+          }}
+        >
+          <View className="flex-1 bg-black/60 justify-center items-center p-5">
+            <View className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-xl border border-slate-100">
+              <Text className="text-lg font-bold text-slate-900 text-center mb-1">
+                Confirm Ticket Details
+              </Text>
+              <Text className="text-xs text-slate-500 text-center mb-4">
+                Please verify your information before submitting.
+              </Text>
 
-            <Text style={styles.detail}>
-              Course: {item.course || 'N/A'}
-            </Text>
+              {/* Input Verification Summary */}
+              <View className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 mb-4">
+                <Text className="text-xs text-slate-500 mb-1">
+                  Name:{" "}
+                  <Text className="font-semibold text-slate-800">{name}</Text>
+                </Text>
+                <Text className="text-xs text-slate-500 mb-1">
+                  Email:{" "}
+                  <Text className="font-semibold text-slate-800">{email}</Text>
+                </Text>
+                <Text className="text-xs text-slate-500 mb-1">
+                  Category:{" "}
+                  <Text className="font-semibold text-blue-600">
+                    {issueCategory}
+                  </Text>
+                </Text>
+                <Text className="text-xs text-slate-500 mb-1" numberOfLines={2}>
+                  Message:{" "}
+                  <Text className="font-medium text-slate-800">{message}</Text>
+                </Text>
+                <Text className="text-xs text-slate-500 mt-1">
+                  Attachment:{" "}
+                  <Text className="font-semibold text-slate-800">
+                    {imageUri ? "Screenshot attached" : "None"}
+                  </Text>
+                </Text>
+              </View>
 
-            <Text style={styles.detail}>
-              Year Level: {item.year || 'N/A'}
-            </Text>
+              {/* Modal Actions */}
+              <View className="flex-row gap-3">
+                <TouchableOpacity
+                  disabled={loading}
+                  onPress={() => setIsModalVisible(false)}
+                  className="flex-1 bg-slate-200 py-3 rounded-xl items-center"
+                >
+                  <Text className="text-slate-700 font-semibold text-sm">
+                    Edit Details
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  disabled={loading}
+                  onPress={handleConfirmSubmit}
+                  className="flex-1 bg-blue-600 py-3 rounded-xl items-center justify-center flex-row"
+                >
+                  {loading ? (
+                    <ActivityIndicator color="#FFFFFF" size="small" />
+                  ) : (
+                    <Text className="text-white font-bold text-sm">
+                      Confirm & Send
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
           </View>
-        </View>
-      )}
-    />
+        </Modal>
+
+        <Modal
+          visible={alertModal.visible}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() =>
+            setAlertModal((prev) => ({ ...prev, visible: false }))
+          }
+        >
+          <View className="flex-1 bg-black/60 justify-center items-center p-5">
+            <View className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-xl border border-slate-100 items-center">
+              {/* Dynamic Title */}
+              <Text className="text-lg font-bold text-slate-900 text-center mb-2">
+                {alertModal.title}
+              </Text>
+
+              {/* Dynamic Message */}
+              <Text className="text-sm text-slate-600 text-center mb-6 leading-5">
+                {alertModal.message}
+              </Text>
+
+              {/* Action Button */}
+              <TouchableOpacity
+                onPress={() =>
+                  setAlertModal((prev) => ({ ...prev, visible: false }))
+                }
+                className="bg-blue-600 w-full py-3.5 rounded-xl items-center justify-center"
+              >
+                <Text className="text-white font-bold text-sm">OK</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+      </SafeAreaView>
+    </SafeAreaProvider>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: {
+  safeArea: {
     flex: 1,
-    backgroundColor: '#f8fafc',
+    backgroundColor: "#f8fafc",
   },
   container: {
     padding: 20,
-    paddingTop: 50,
-    paddingBottom: 30,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#172033',
-    textAlign: 'center',
-  },
-  subtitle: {
-    fontSize: 14,
-    color: '#64748b',
-    marginTop: 5,
-    marginBottom: 25,
-    textAlign: 'center',
-  },
-  form: {
-    backgroundColor: '#ffffff',
-    padding: 18,
-    borderRadius: 14,
-    marginBottom: 25,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#172033',
-    marginBottom: 14,
-  },
-  input: {
-    height: 48,
-    borderWidth: 1,
-    borderColor: '#dbe2ea',
-    borderRadius: 9,
-    paddingHorizontal: 13,
-    marginBottom: 12,
-    fontSize: 15,
-    color: '#172033',
-    backgroundColor: '#ffffff',
-  },
-  addButton: {
-    height: 48,
-    backgroundColor: '#2563eb',
-    borderRadius: 9,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 4,
-  },
-  disabledButton: {
-    opacity: 0.6,
-  },
-  buttonText: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  listHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  listTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  countBadge: {
-    backgroundColor: '#dbeafe',
-    minWidth: 28,
-    height: 28,
-    paddingHorizontal: 8,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 14,
-  },
-  countText: {
-    color: '#2563eb',
-    fontSize: 13,
-    fontWeight: 'bold',
-  },
-  refreshButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    backgroundColor: '#dbeafe',
-    borderRadius: 8,
-    marginBottom: 14,
-  },
-  refreshText: {
-    color: '#2563eb',
-    fontWeight: 'bold',
-    fontSize: 14,
-  },
-  card: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#ffffff',
-    padding: 15,
-    borderRadius: 12,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-  },
-  avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#dbeafe',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 13,
-  },
-  avatarText: {
-    color: '#2563eb',
-    fontSize: 20,
-    fontWeight: 'bold',
-  },
-  studentInfo: {
-    flex: 1,
-  },
-  studentName: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#172033',
-    marginBottom: 5,
-  },
-  detail: {
-    fontSize: 14,
-    color: '#64748b',
-    marginTop: 2,
-  },
-  error: {
-    color: '#dc2626',
-    marginBottom: 10,
-    fontSize: 14,
-    textAlign: 'center'
-  },
-  success: {
-    color: '#15803d',
-    marginBottom: 10,
-    fontSize: 14,
-    textAlign: 'center'
-  },
-  empty: {
-    textAlign: 'center',
-    color: '#64748b',
-    paddingVertical: 20,
+    paddingBottom: 40,
   },
 });
